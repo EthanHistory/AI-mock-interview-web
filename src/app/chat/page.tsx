@@ -16,6 +16,7 @@ export default function ChatPage() {
   const [transcription, setTranscription] = useState(""); // State to store transcribed text
   const [interviewerAnswer, setInterviewerAnswer] = useState("Please introduce yourself."); // State to store interviewer's response
   const [loading, setLoading] = useState(false); // State for loading spinner
+  const [colorChangeTrigger, setColorChangeTrigger] = useState(false); // State to trigger color change
   const intervieweeResponseRef = useRef(""); // Ref for interviewee response
   const chatHistoryRef = useRef<TupleList>([
     ["ai", "Please introduce yourself."]
@@ -28,6 +29,12 @@ export default function ChatPage() {
     }
     sequence();
   }, []);
+
+  useEffect(() => {
+    if (interviewerAnswer) {
+      setColorChangeTrigger(true);
+    }
+  }, [interviewerAnswer]);
 
   const startRecording = async () => {
     if (!('webkitSpeechRecognition' in window)) {
@@ -98,15 +105,15 @@ export default function ChatPage() {
               }),
               signal: abortController.signal // Attach the abort signal to the fetch request
             });
-
-            if (response.ok) {
+            if (!abortController.signal.aborted && response.ok) {
               const data = await response.json();
-
-              if (data.is_complete_response) {
+              if (data.is_enough_response) {
                 chatHistoryRef.current.push(["human", intervieweeResponseRef.current]);
                 chatHistoryRef.current.push(["ai", data.output]);
                 intervieweeResponseRef.current = "";
                 setInterviewerAnswer(data.output); // Update interviewer's response state
+              } else{
+                console.log("NONO")
               }
             }
           } catch (error) {
@@ -204,16 +211,23 @@ export default function ChatPage() {
           <p className="text-black">{transcription}</p>
         </div>
       )}
-      {loading ? (
-        <LoadingSpinner />
-      ) : (
-        interviewerAnswer && (
-          <div className="mt-4 bg-gray-100 p-4 rounded-lg">
-            <h2 className="text-xl text-black font-semibold">Interviewer:</h2>
-            <p className="text-black">{interviewerAnswer}</p>
+      <motion.div
+        className="mt-4 p-4 rounded-lg relative"
+        initial={{ backgroundColor: 'white' }}
+        animate={{
+          backgroundColor: colorChangeTrigger ? ['green', 'white'] : 'white',
+        }}
+        transition={{ duration: 1, times: [0, 1] }}
+        onAnimationComplete={() => setColorChangeTrigger(false)}
+      >
+        <h2 className="text-xl text-black font-semibold">Interviewer:</h2>
+        <p className="text-black">{interviewerAnswer}</p>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75">
+            <LoadingSpinner />
           </div>
-        )
-      )}
+        )}
+      </motion.div>
     </div>
   );
 }
