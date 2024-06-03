@@ -2,7 +2,9 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, animate } from 'framer-motion';
-import axios from 'axios';
+import LoadingSpinner from '../components/LoadingSpinner';
+
+export type TupleList = [string, string][];
 
 export default function ChatPage() {
   const scope = useRef(null);
@@ -12,7 +14,13 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false);
   const [amplitudeArray, setAmplitudeArray] = useState(new Uint8Array(16)); // Reduced number of bars
   const [transcription, setTranscription] = useState(""); // State to store transcribed text
-  const [interviewerAnswer, setInterviewerAnswer] = useState(""); // State to store interviewer's response
+  const [interviewerAnswer, setInterviewerAnswer] = useState("Please introduce yourself."); // State to store interviewer's response
+  const [loading, setLoading] = useState(false); // State for loading spinner
+  const intervieweeResponseRef = useRef(""); // Ref for interviewee response
+  const chatHistoryRef = useRef<TupleList>([
+    ["ai", "Please introduce yourself."]
+  ]);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     async function sequence() {
@@ -41,7 +49,7 @@ export default function ChatPage() {
       if (!recordingRef.current) return; // Exit if not recording
       requestAnimationFrame(updateAmplitude);
       analyser.getByteFrequencyData(dataArray);
-      setAmplitudeArray([...dataArray.slice(10, 26)]); // Only take the first 16 values
+      setAmplitudeArray(dataArray.slice(10, 26)); // Only take the first 16 values
     };
 
     setRecording(true);
@@ -64,16 +72,51 @@ export default function ChatPage() {
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           const finalTranscription = event.results[i][0].transcript;
+          const combinedTranscription = intervieweeResponseRef.current + " " + finalTranscription;
+          intervieweeResponseRef.current = combinedTranscription
           setTranscription(finalTranscription); // Update the transcription state
-          console.log('Final Transcription:', finalTranscription);
-          // Send transcription to FastAPI endpoint
+
+          // Abort the previous request if it exists
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+          }
+
+          // Create a new AbortController
+          const abortController = new AbortController();
+          abortControllerRef.current = abortController;
+
+          setLoading(true); // Start loading
           try {
-            const response = await axios.post('http://localhost:8000/answer', {
-              interviewee_answer: finalTranscription
+            const response = await fetch('http://localhost:8000/answer', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                'input': intervieweeResponseRef.current,
+                'chat_history': chatHistoryRef.current
+              }),
+              signal: abortController.signal // Attach the abort signal to the fetch request
             });
-            setInterviewerAnswer(response.data.interviewer_answer); // Update interviewer's response state
+
+            if (response.ok) {
+              const data = await response.json();
+
+              if (data.is_complete_response) {
+                chatHistoryRef.current.push(["human", intervieweeResponseRef.current]);
+                chatHistoryRef.current.push(["ai", data.output]);
+                intervieweeResponseRef.current = "";
+                setInterviewerAnswer(data.output); // Update interviewer's response state
+              }
+            }
           } catch (error) {
-            console.error('Error sending transcription:', error);
+            if (error.name === 'AbortError') {
+              console.log('Fetch aborted');
+            } else {
+              console.error('Error sending transcription:', error);
+            }
+          } finally {
+            setLoading(false); // Stop loading
           }
         }
       }
@@ -106,6 +149,10 @@ export default function ChatPage() {
       recognitionRef.current.stop();
       recordingRef.current = false;
       setRecording(false);
+    }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
   };
 
@@ -157,11 +204,15 @@ export default function ChatPage() {
           <p className="text-black">{transcription}</p>
         </div>
       )}
-      {interviewerAnswer && (
-        <div className="mt-4 bg-gray-100 p-4 rounded-lg">
-          <h2 className="text-xl text-black font-semibold">Interviewer:</h2>
-          <p className="text-black">{interviewerAnswer}</p>
-        </div>
+      {loading ? (
+        <LoadingSpinner />
+      ) : (
+        interviewerAnswer && (
+          <div className="mt-4 bg-gray-100 p-4 rounded-lg">
+            <h2 className="text-xl text-black font-semibold">Interviewer:</h2>
+            <p className="text-black">{interviewerAnswer}</p>
+          </div>
+        )
       )}
     </div>
   );
