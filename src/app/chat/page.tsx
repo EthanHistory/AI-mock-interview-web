@@ -59,14 +59,14 @@ export default function ChatPage() {
       {!isModalOpen && (
         <>
           <motion.h1 
-            className="text-4xl font-bold mb-4" 
+            className="text-4xl font-bold mb-24" 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 2 }}
           >
             AI Mock Interview Session
           </motion.h1>
-          <div className="flex justify-center space-x-20">
+          <div className="flex justify-center space-x-40">
             <div className="flex flex-col items-center">
               <motion.div 
                 className="relative"
@@ -79,11 +79,14 @@ export default function ChatPage() {
                   mass: 1,
                 }}
               >
-                <img 
+                <motion.img 
                   src="/user.png" 
                   alt="User" 
-                  className="rounded-full w-40 h-40" 
-                />
+                  className="rounded-full w-80 h-80" 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 1 }}
+              />
               </motion.div>
               <p className="mt-2">{name}</p>
             </div>
@@ -91,7 +94,7 @@ export default function ChatPage() {
               <motion.img 
                 src="/interviewer.png" 
                 alt="AI Interviewer" 
-                className="rounded-full w-40 h-40" 
+                className="rounded-full w-80 h-80" 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 1 }}

@@ -4,19 +4,38 @@ import { motion } from 'framer-motion';
 
 export default function AudioRecorder({ onAmplitudeChange }) {
   const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const dataArrayRef = useRef(null);
+  const audioRef = useRef(new Audio());
+  const silenceStart = useRef(null);
+  const animationFrameId = useRef(null);
 
   useEffect(() => {
     if (isRecording) {
       startRecording();
     } else {
       stopRecording();
+      // Reset audio chunks when recording stops
+      audioChunksRef.current = [];
     }
+    // Cleanup the animation frame on unmount
+    return () => {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
   }, [isRecording]);
+
+  useEffect(() => {
+    audioRef.current.onended = () => {
+      setIsPlaying(false);
+      setIsRecording(true); // Restart recording after playback
+    };
+  }, []);
 
   const startRecording = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -25,6 +44,22 @@ export default function AudioRecorder({ onAmplitudeChange }) {
 
     mediaRecorderRef.current.addEventListener("dataavailable", event => {
       audioChunksRef.current.push(event.data);
+    });
+
+    mediaRecorderRef.current.addEventListener("stop", () => {
+      if (audioChunksRef.current.length > 0) {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        if (audioBlob.size > 0) {
+          const audioURL = URL.createObjectURL(audioBlob);
+          audioRef.current.src = audioURL;
+          setIsPlaying(true);
+          audioRef.current.play().catch(error => {
+            console.error("Failed to play audio:", error);
+          });
+        } else {
+          console.warn("Recorded audio is too short or empty.");
+        }
+      }
     });
 
     mediaRecorderRef.current.start();
@@ -39,8 +74,24 @@ export default function AudioRecorder({ onAmplitudeChange }) {
       analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
       const amplitude = Math.max(...dataArrayRef.current) - 128;
       onAmplitudeChange(amplitude);
+
+      const silenceBuffer = 5;
+      const isSilent = dataArrayRef.current.every(amplitude => 
+        amplitude >= (128 - silenceBuffer) && amplitude <= (128 + silenceBuffer)
+      );
+
+      if (isSilent) {
+        if (silenceStart.current === null) {
+          silenceStart.current = Date.now();
+        } else if (Date.now() - silenceStart.current > 1500) {
+          setIsRecording(false);
+        }
+      } else {
+        silenceStart.current = null;
+      }
+
       if (isRecording) {
-        requestAnimationFrame(updateAmplitude);
+        animationFrameId.current = requestAnimationFrame(updateAmplitude);
       }
     };
 
@@ -54,6 +105,10 @@ export default function AudioRecorder({ onAmplitudeChange }) {
     if (audioContextRef.current) {
       audioContextRef.current.close();
     }
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+    }
+    silenceStart.current = null; // Reset silenceStart when stopping the recording
   };
 
   const handleRecord = () => {
@@ -62,24 +117,18 @@ export default function AudioRecorder({ onAmplitudeChange }) {
 
   return (
     <div>
-      { isRecording ? 
-          <motion.button
-            className="px-4 py-2 bg-red-500 text-white rounded"
-            whileHover={{ scale: 1.2 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleRecord}
-          >
-          Stop Recording
-          </motion.button>
-          :
-          <motion.button 
-          className="px-4 py-2 bg-blue-500 text-white rounded"
-          whileHover={{ scale: 1.2 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleRecord}>
-          Start Recording
-          </motion.button>
-      }
+      <motion.button
+        className={`px-4 py-2 text-white rounded ${
+          isRecording ? 'bg-red-500' : (isPlaying ? 'bg-gray-500' : 'bg-blue-500')
+        } ${isPlaying ? 'cursor-not-allowed' : ''}`}        
+        whileHover={{ scale: isPlaying ? 1 : 1.2 }}
+        whileTap={{ scale: isPlaying ? 1 : 0.95 }}
+        onClick={handleRecord}
+        disabled={isPlaying}
+      >
+        {isRecording ? 'Stop Recording' : (isPlaying ? 'Playing' : 'Start Recording')}
+      </motion.button>
+      <audio ref={audioRef} hidden />
     </div>
   );
 }
