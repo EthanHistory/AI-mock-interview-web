@@ -5,24 +5,22 @@ import { motion } from 'framer-motion';
 export default function AudioRecorder({ onAmplitudeChange }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const dataArrayRef = useRef(null);
-  const audioRef = useRef(new Audio());
-  const silenceStart = useRef(null);
-  const animationFrameId = useRef(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(new Audio());
+  const silenceStart = useRef<number | null>(null);
+  const animationFrameId = useRef<number | null>(null);
 
   useEffect(() => {
     if (isRecording) {
       startRecording();
     } else {
       stopRecording();
-      // Reset audio chunks when recording stops
       audioChunksRef.current = [];
     }
-    // Cleanup the animation frame on unmount
     return () => {
       if (animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
@@ -33,7 +31,7 @@ export default function AudioRecorder({ onAmplitudeChange }) {
   useEffect(() => {
     audioRef.current.onended = () => {
       setIsPlaying(false);
-      setIsRecording(true); // Restart recording after playback
+      setIsRecording(true);
     };
   }, []);
 
@@ -48,7 +46,7 @@ export default function AudioRecorder({ onAmplitudeChange }) {
 
     mediaRecorderRef.current.addEventListener("stop", () => {
       if (audioChunksRef.current.length > 0) {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
         if (audioBlob.size > 0) {
           const audioURL = URL.createObjectURL(audioBlob);
           audioRef.current.src = audioURL;
@@ -56,6 +54,7 @@ export default function AudioRecorder({ onAmplitudeChange }) {
           audioRef.current.play().catch(error => {
             console.error("Failed to play audio:", error);
           });
+          sendAudioToServer(audioBlob);
         } else {
           console.warn("Recorded audio is too short or empty.");
         }
@@ -71,7 +70,7 @@ export default function AudioRecorder({ onAmplitudeChange }) {
     dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
 
     const updateAmplitude = () => {
-      analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+      analyserRef.current?.getByteTimeDomainData(dataArrayRef.current);
       const amplitude = Math.max(...dataArrayRef.current) - 128;
       onAmplitudeChange(amplitude);
 
@@ -108,8 +107,21 @@ export default function AudioRecorder({ onAmplitudeChange }) {
     if (animationFrameId.current) {
       cancelAnimationFrame(animationFrameId.current);
     }
-    silenceStart.current = null; // Reset silenceStart when stopping the recording
+    silenceStart.current = null;
   };
+
+  const sendAudioToServer = async (audioBlob: Blob) => {
+    const response = await fetch('/api/uploadAudio', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+      },
+      body: audioBlob,
+    });
+  
+    const data = await response.json();
+    console.log(data.response);
+  };  
 
   const handleRecord = () => {
     setIsRecording(prevState => !prevState);
@@ -120,7 +132,7 @@ export default function AudioRecorder({ onAmplitudeChange }) {
       <motion.button
         className={`px-4 py-2 text-white rounded ${
           isRecording ? 'bg-red-500' : (isPlaying ? 'bg-gray-500' : 'bg-blue-500')
-        } ${isPlaying ? 'cursor-not-allowed' : ''}`}        
+        } ${isPlaying ? 'cursor-not-allowed' : ''}`}
         whileHover={{ scale: isPlaying ? 1 : 1.2 }}
         whileTap={{ scale: isPlaying ? 1 : 0.95 }}
         onClick={handleRecord}
