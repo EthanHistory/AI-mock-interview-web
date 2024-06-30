@@ -1,10 +1,12 @@
 // components/AudioRecorder.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { JsonOutputParser } from "@langchain/core/output_parsers";
 
 export default function AudioRecorder({ onAmplitudeChange }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isSlient, setIsSlient] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -31,7 +33,13 @@ export default function AudioRecorder({ onAmplitudeChange }) {
   useEffect(() => {
     audioRef.current.onended = () => {
       setIsPlaying(false);
-      setIsRecording(true);
+
+      if (isSlient) {
+        setIsRecording(true);
+      } else {
+        setIsRecording(false);
+      }
+      setIsSlient(false);
     };
   }, []);
 
@@ -48,12 +56,6 @@ export default function AudioRecorder({ onAmplitudeChange }) {
       if (audioChunksRef.current.length > 0) {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
         if (audioBlob.size > 0) {
-          const audioURL = URL.createObjectURL(audioBlob);
-          audioRef.current.src = audioURL;
-          setIsPlaying(true);
-          audioRef.current.play().catch(error => {
-            console.error("Failed to play audio:", error);
-          });
           sendAudioToServer(audioBlob);
         } else {
           console.warn("Recorded audio is too short or empty.");
@@ -83,6 +85,7 @@ export default function AudioRecorder({ onAmplitudeChange }) {
         if (silenceStart.current === null) {
           silenceStart.current = Date.now();
         } else if (Date.now() - silenceStart.current > 1500) {
+          setIsSlient(true);
           setIsRecording(false);
         }
       } else {
@@ -118,10 +121,36 @@ export default function AudioRecorder({ onAmplitudeChange }) {
       },
       body: audioBlob,
     });
-  
+
     const data = await response.json();
     console.log(data.response);
-  };  
+
+    const parser = new JsonOutputParser();
+    const structured_response = await parser.invoke(data.response);
+    if (structured_response && structured_response.finish) {
+      const elevenLabsResponse = await fetch('/api/elevenlabs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(structured_response.answer),
+      });
+
+      if (!elevenLabsResponse.ok) {
+        throw new Error('Failed to fetch audio from Eleven Labs');
+      }
+
+      const audioBlob = await elevenLabsResponse.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      audioRef.current.src = audioUrl;
+      audioRef.current.play().catch(error => {
+        console.error('Error playing audio:', error);
+      });
+      setIsPlaying(true);
+    }
+  };
+  
 
   const handleRecord = () => {
     setIsRecording(prevState => !prevState);
